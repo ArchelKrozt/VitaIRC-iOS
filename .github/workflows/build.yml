@@ -1,0 +1,66 @@
+name: Build iOS app
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Core checks (IRC protocol, logs, settings)
+        run: swift run CoreChecks
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project VitaIRC.xcodeproj -scheme VitaIRC -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -40
+
+      - name: Screenshots (demo mode in the simulator)
+        run: |
+          DEV=$(xcrun simctl list devices available | grep -oE 'iPhone 1[5-9][^(]*' | head -1 | sed 's/ *$//')
+          echo "device: $DEV"
+          SIM_DEVICE="$DEV" tools/screenshots.sh build/Build/Products/Debug-iphonesimulator/VitaIRC.app shots/en en
+          SIM_DEVICE="$DEV" tools/screenshots.sh build/Build/Products/Debug-iphonesimulator/VitaIRC.app shots/es es
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/
+
+      - name: Build the IPA (unsigned: AltStore / SideStore / Sideloadly sign it)
+        run: |
+          set -o pipefail
+          xcodebuild -project VitaIRC.xcodeproj -scheme VitaIRC -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -20
+          mkdir -p dist/Payload
+          cp -R build/Build/Products/Release-iphoneos/VitaIRC.app dist/Payload/
+          (cd dist && zip -qry VitaIRC.ipa Payload && rm -rf Payload)
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VitaIRC-iOS
+          path: dist/VitaIRC.ipa
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/VitaIRC.ipa
+          generate_release_notes: true

@@ -1,0 +1,52 @@
+# Xcode project for VitaIRC for iPhone: `xcodegen` generates VitaIRC.xcodeproj from this file.
+name: VitaIRC
+options:
+  bundleIdPrefix: io.github.archelkrozt
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  VitaIRCCore:
+    path: .
+targets:
+  VitaIRC:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: VitaIRCCore
+        product: VitaIRCCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: VitaIRC
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UIUserInterfaceStyle: Dark
+        # config.ini and the logs are visible in the Files app (copy the Vita's config.ini there)
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        NSCameraUsageDescription: VitaIRC uses the camera to take a photo and send it to the chat.
+        NSPhotoLibraryAddUsageDescription: VitaIRC saves the images you choose to save into Photos.
+        NSPhotoLibraryUsageDescription: VitaIRC lets you pick a photo to send to the chat.
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.archelkrozt.vitairc
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: NO
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+schemes:
+  VitaIRC:
+    build:
+      targets:
+        VitaIRC: all
