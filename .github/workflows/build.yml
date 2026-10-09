@@ -43,7 +43,7 @@ jobs:
           name: screenshots
           path: shots/
 
-      - name: Build the IPA (unsigned: AltStore / SideStore / Sideloadly sign it)
+      - name: "Build the IPA (unsigned; AltStore, SideStore or Sideloadly sign it)"
         run: |
           set -o pipefail
           xcodebuild -project VitaIRC.xcodeproj -scheme VitaIRC -configuration Release -sdk iphoneos \
