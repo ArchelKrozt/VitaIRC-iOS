@@ -22,6 +22,7 @@ public struct BooruState {
     public var loading = false
     public var more = false
     public var error = ""
+    public init(engine: Int = 0, query: String = "", loading: Bool = false) { self.engine = engine; self.query = query; self.loading = loading }
 }
 
 /// JSON values as the Android version reads them (numbers and nulls become text).
