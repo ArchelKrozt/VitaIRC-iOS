@@ -191,16 +191,15 @@ struct MessageList: View {
                     ForEach(c.msgs) { m in
                         MessageRow(m: m, flash: flash == m.id, onTap: { onTap(m) }) { e in react(c, m, e) }
                             .id(m.id)
-                            .onAppear {
-                                if m.id == c.msgs.first?.id { requestOlder() }
-                                if m.id == c.msgs.last?.id { atBottom = true }
-                            }
-                            .onDisappear { if m.id == c.msgs.last?.id { atBottom = false } }
+                            .onAppear { if m.id == c.msgs.first?.id { requestOlder() } }
                     }
                     Color.clear.frame(height: 4).id("bottom")
+                        .onAppear { atBottom = true }
+                        .onDisappear { atBottom = false }
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .id(c.uid)          // each window keeps its own scroll position
             .environment(\.openURL, OpenURLAction { url in Actions.openLink(url.absoluteString); return .handled })
             .overlay(alignment: .topLeading) {
                 if c.msgs.isEmpty { Text(t("Sin mensajes todavía.")).foregroundColor(C.faint).padding() }

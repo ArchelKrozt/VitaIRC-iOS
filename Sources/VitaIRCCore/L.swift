@@ -5,7 +5,7 @@ public enum L {
     nonisolated(unsafe) public static var english = false
     public static func t(_ es: String) -> String { english ? (en[es] ?? es) : es }
     private static let en: [String: String] = {
-        var d = [String: String](minimumCapacity: 956)
+        var d = [String: String](minimumCapacity: 978)
         d["» traduciendo..."] = "» translating..."
         d["▼ mensajes nuevos abajo"] = "▼ new messages below"
         d["Sin mensajes todavía."] = "No messages yet."
@@ -484,6 +484,17 @@ public enum L {
         d["Más tarde"] = "Later"
         d["versión %s"] = "version %s"
         d["%d guardados en este dispositivo"] = "%d saved on this device"
+        d["Eliminar servidor"] = "Delete server"
+        d["En iPhone la conexión sigue unos segundos al salir de la app. Con un bouncer (soju/ZNC) recibes al volver lo que te perdiste."] = "On iPhone the connection stays a few seconds after you leave the app. With a bouncer (soju/ZNC) you get what you missed when you come back."
+        d["Fotos"] = "Photos"
+        d["Guardando en Fotos..."] = "Saving to Photos..."
+        d["Hay una versión nueva de VitaIRC. En iPhone se instala igual que la primera vez (la página explica cómo); tus servidores, ajustes e historial se conservan."] = "There is a new version of VitaIRC. On iPhone it installs the same way as the first time (the page explains how); your servers, settings and history are kept."
+        d["La lista de ventanas tiene servidores, canales y privados. Mantén pulsado uno para silenciarlo o cerrarlo."] = "The window list has servers, channels and private chats. Long-press one to mute or close it."
+        d["Mensaje"] = "Message"
+        d["Tus ajustes están en la app Archivos → VitaIRC (config.ini, el mismo de la Vita y Android)."] = "Your settings are in the Files app → VitaIRC (config.ini, the same as on the Vita and Android)."
+        d["Ver cómo instalarla"] = "See how to install it"
+        d["sin permiso para Fotos"] = "no permission for Photos"
+        d["¡%s disponible! Pulsa para ver cómo instalarla"] = "%s available! Tap to see how to install it"
         return d
     }()
 }

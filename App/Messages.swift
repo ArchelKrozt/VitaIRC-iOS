@@ -114,7 +114,7 @@ struct MessageRow: View {
                 if !m.reacts.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(m.reacts, id: \.self) { r in
-                            Text("\(r.emoji) \(r.count)").font(.system(size: fs(13))).foregroundColor(r.mine ? C.accent : C.text)
+                            Text(verbatim: "\(r.emoji) \(r.count)").font(.system(size: fs(13))).foregroundColor(r.mine ? C.accent : C.text)
                                 .padding(.horizontal, 8).padding(.vertical, 2)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(r.mine ? Color(hex: 0x3A3410) : C.sel))
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(r.mine ? C.accent : .clear))

@@ -29,7 +29,7 @@ struct ServersView: View {
                         Circle().fill(C.state(st)).frame(width: 10, height: 10)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(cfg.name).font(.system(size: 16, weight: .semibold)).foregroundColor(C.text)
-                            Text("\(cfg.host):\(cfg.port)\(cfg.ssl ? " SSL" : "") · \(cfg.nick)").font(.caption).foregroundColor(C.dim)
+                            Text(verbatim: "\(cfg.host):\(cfg.port)\(cfg.ssl ? " SSL" : "") · \(cfg.nick)").font(.caption).foregroundColor(C.dim)
                             Text(stateText(st)).font(.caption2).foregroundColor(C.state(st))
                         }
                         Spacer()
@@ -202,7 +202,7 @@ struct SettingsView: View {
                     Toggle(t("Colores y negritas de IRC"), isOn: bind(Config.ircColors) { Config.ircColors = $0 })
                     Toggle(t("Mostrar entradas/salidas"), isOn: bind(Config.showJoins) { Config.showJoins = $0 })
                     Picker(t("Tamaño de texto"), selection: bind(Config.fontPct) { Config.fontPct = $0 }) {
-                        ForEach([85, 100, 115, 130], id: \.self) { Text("\($0)%").tag($0) }
+                        ForEach([85, 100, 115, 130], id: \.self) { Text(verbatim: "\($0)%").tag($0) }
                     }
                     Picker(t("Idioma de la interfaz"), selection: bind(Config.uiLang) { Config.uiLang = $0; VitaIRCApp.applyLanguage() }) {
                         Text(t("Automático")).tag(0); Text("Español").tag(1); Text("English").tag(2)
@@ -335,7 +335,7 @@ struct ChanListView: View {
                                 if !e.topic.isEmpty { Text(e.topic).font(.system(size: 13)).foregroundColor(C.dim).lineLimit(2) }
                             }
                             Spacer()
-                            Text("\(e.users)").foregroundColor(C.accent)
+                            Text(verbatim: "\(e.users)").foregroundColor(C.accent)
                         }
                     }.listRowBackground(C.panel)
                 }

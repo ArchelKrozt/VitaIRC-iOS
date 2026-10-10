@@ -25,4 +25,5 @@ for i in $(seq 1 400); do
   sleep 0.4
   xcrun simctl io "$DEV" screenshot "$OUT/$step.png" >/dev/null 2>&1 && echo "$step"
 done
+cp "$DATA/Documents/demo_log.txt" "$OUT/demo_log.txt" 2>/dev/null || true
 xcrun simctl terminate "$DEV" "$ID" || true

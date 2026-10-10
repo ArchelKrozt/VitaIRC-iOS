@@ -276,7 +276,7 @@ struct UploadsSheet: View {
                         } label: {
                             VStack(alignment: .leading) {
                                 Text(u.link).foregroundColor(C.chan).lineLimit(1)
-                                Text("\(u.date)  ·  \(u.host)").font(.caption).foregroundColor(C.dim)
+                                Text(verbatim: "\(u.date)  ·  \(u.host)").font(.caption).foregroundColor(C.dim)
                             }
                         }
                         if !u.deleteUrl.isEmpty {

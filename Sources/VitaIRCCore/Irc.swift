@@ -1187,7 +1187,7 @@ public enum Irc {
     private static func connError(_ cfg: ServerCfg, _ e: Error) -> String {
         if let c = e as? ConnError {
             if c.dns { return t("No se pudo resolver %s").f(cfg.host) }
-            if c.tls { return t("Error TLS: %s (-0x%04x)").f(c.message, 0) }
+            if c.tls { return t("Error TLS: %s (-0x%04x)").f(c.message, 0).replacingOccurrences(of: " (-0x0000)", with: "") }
         }
         return t("No se pudo conectar a %s:%d").f(cfg.host, cfg.port)
     }

@@ -92,6 +92,10 @@ final class ImageCache {
             var img: UIImage?
             if url.hasPrefix("file://"), let u = URL(string: url), let d = try? Data(contentsOf: u) { img = ImageCache.decode(d, maxPixel) }
             else if let r = try? Http.call(url, headers: headers, max: 40 * 1024 * 1024, ua: headers["User-Agent"]), r.ok { img = ImageCache.decode(r.body, maxPixel) }
+            if img == nil && ProcessInfo.processInfo.environment["VITAIRC_DEMO"] == "1" {
+                let r = try? Http.call(url, headers: headers, max: 40 * 1024 * 1024, ua: headers["User-Agent"])
+                Demo.log("image failed: \(url) code=\(r?.code ?? -1) type=\(r?.contentType ?? "-") bytes=\(r?.body.count ?? -1)")
+            }
             if let i = img { self.cache.setObject(i, forKey: url as NSString, cost: Int(i.size.width * i.size.height * 4 * CGFloat(max(1, i.images?.count ?? 1)))) }
             self.lock.lock()
             let cbs = self.waiting.removeValue(forKey: url) ?? []
