@@ -113,7 +113,8 @@ struct ChatView: View {
         Group {
             if let c = model.chan {
                 VStack(spacing: 0) {
-                    MessageList(c: c) { ui.msgSheet = $0 }
+                    // a fresh list per window (scroll position and "at the end" start over)
+                    MessageList(c: c) { ui.msgSheet = $0 }.id(c.uid)
                     InputBar(c: c)
                 }
                 .background(C.bg)
@@ -199,7 +200,6 @@ struct MessageList: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .id(c.uid)          // each window keeps its own scroll position
             .environment(\.openURL, OpenURLAction { url in Actions.openLink(url.absoluteString); return .handled })
             .overlay(alignment: .topLeading) {
                 if c.msgs.isEmpty { Text(t("Sin mensajes todavía.")).foregroundColor(C.faint).padding() }

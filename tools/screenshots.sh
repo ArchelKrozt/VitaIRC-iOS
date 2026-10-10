@@ -15,15 +15,17 @@ SIMCTL_CHILD_VITAIRC_DEMO=1 xcrun simctl launch "$DEV" "$ID" -AppleLanguages "($
 DATA=$(xcrun simctl get_app_container "$DEV" "$ID" data)
 STEP_FILE="$DATA/Documents/demo_step.txt"
 last=""
-for i in $(seq 1 400); do
+for i in $(seq 1 1200); do
   sleep 0.5
   step=$(cat "$STEP_FILE" 2>/dev/null || true)
   [ "$step" = "$last" ] && continue
   last="$step"
   [ "$step" = "done" ] && break
   [ -z "$step" ] && continue
-  sleep 0.4
+  sleep 0.6
   xcrun simctl io "$DEV" screenshot "$OUT/$step.png" >/dev/null 2>&1 && echo "$step"
+  # the app waits for this before going on
+  printf '%s' "$step" > "$DATA/Documents/demo_ack.txt"
 done
 cp "$DATA/Documents/demo_log.txt" "$OUT/demo_log.txt" 2>/dev/null || true
 xcrun simctl terminate "$DEV" "$ID" || true

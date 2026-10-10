@@ -6,9 +6,16 @@ import VitaIRCCore
 /// are local only: nothing is sent to the network.
 @MainActor
 enum Demo {
-    static func step(_ name: String) {
+    /// Writes the step and waits until the screenshot script took it (demo_ack.txt), at most 40 s.
+    static func step(_ name: String) async {
         let f = Config.dir.appendingPathComponent("demo_step.txt")
+        let ack = Config.dir.appendingPathComponent("demo_ack.txt")
         try? name.write(to: f, atomically: true, encoding: .utf8)
+        if name == "done" { return }
+        for _ in 0..<200 {
+            if (try? String(contentsOf: ack, encoding: .utf8))?.trimmed == name { return }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
     }
 
     /// Diagnostics of the demo run (tools/screenshots.sh copies it next to the screenshots)
@@ -27,7 +34,6 @@ enum Demo {
     static func start() {
         Task { @MainActor in
             let ui = UiState.shared, model = AppModel.shared
-            await wait(0.3); step("01_start"); await wait(4)
             // wait until online and in #vitasdk
             for _ in 0..<80 {
                 let ready = Irc.locked { !Irc.servers.isEmpty && Irc.servers[0].state == .online && Irc.findChan(Irc.servers[0], "#vitasdk")?.joined == true }
@@ -37,9 +43,9 @@ enum Demo {
             let s = Irc.locked { Irc.servers[0] }
             let me = Irc.locked { s.nick }
             model.select(0, s.status.uid)
-            await wait(2); step("02_status"); await wait(5)
+            await wait(2); await step("02_status"); await wait(1)
             ui.showChat = false
-            await wait(1.5); step("03_windows"); await wait(5)
+            await wait(1.5); await step("03_windows"); await wait(1)
 
             fake(0, "@time=\(TimeUtil.iso(TimeUtil.now() - 60_000)) :ana!demo@vitairc PRIVMSG \(me) :hola \(me)! mira esto")
             fake(0, ":ana!demo@vitairc PRIVMSG \(me) :https://www.youtube.com/watch?v=dQw4w9WgXcQ")
@@ -47,53 +53,53 @@ enum Demo {
             fake(0, ":ana!demo@vitairc PRIVMSG \(me) :https://github.com/ArchelKrozt/VitaIRC")
             fake(0, ":ana!demo@vitairc PRIVMSG \(me) :\u{02}negrita\u{02} y \u{03}04rojo\u{03} normal")
             if let q = Irc.locked({ Irc.findChan(s, "ana") }) { model.select(0, q.uid) }
-            await wait(9); step("04_previews"); await wait(5)
+            await wait(9); await step("04_previews"); await wait(1)
 
             let b = Irc.locked { Irc.getChan(s, "bob", .query) }
             Irc.locked { b.transIn = true; b.transLang = "es" }
             fake(0, ":bob!demo@vitairc PRIVMSG \(me) :Good evening! The weather here is really nice today, how about there?")
             fake(0, ":bob!demo@vitairc PRIVMSG \(me) :I just finished building the new version of the app.")
             model.select(0, b.uid)
-            await wait(7); step("05_translation"); await wait(5)
+            await wait(7); await step("05_translation"); await wait(1)
 
             if let m = model.chan?.msgs.last { ui.msgSheet = m }
-            await wait(2); step("06_message"); await wait(5)
+            await wait(2); await step("06_message"); await wait(1)
             ui.msgSheet = nil
             await wait(1)
 
             if let v = Irc.locked({ Irc.findChan(s, "#vitasdk") }) { model.select(0, v.uid) }
-            await wait(2); step("07_channel"); await wait(2)
+            await wait(2); await step("07_channel"); await wait(2)
             ui.sheet = .users
-            await wait(2); step("08_users"); await wait(5)
+            await wait(2); await step("08_users"); await wait(1)
             ui.sheet = nil; await wait(1)
 
             ui.chanListQuery = "vita"
             ui.sheet = .chanList
-            await wait(14); step("09_channel_search"); await wait(5)
+            await wait(14); await step("09_channel_search"); await wait(1)
             ui.sheet = nil; await wait(1)
 
             Booru.search(Booru.safebooru, "scenery cat")
             ui.sheet = .booru
-            await wait(9); step("10_image_search"); await wait(5)
+            await wait(9); await step("10_image_search"); await wait(1)
             ui.sheet = nil; await wait(1)
             if let p = Booru.state.results.first { ui.image = ImageTarget(url: p.viewUrl, page: Booru.pageUrl(p), post: p) }
-            await wait(6); step("11_viewer"); await wait(5)
+            await wait(6); await step("11_viewer"); await wait(1)
             ui.image = nil; await wait(1)
             ui.video = VideoTarget(url: "https://www.w3schools.com/html/mov_bbb.mp4", page: "https://www.w3schools.com/html/mov_bbb.mp4")
-            await wait(6); step("12_video"); await wait(5)
+            await wait(6); await step("12_video"); await wait(1)
             ui.video = nil; await wait(1)
 
             ui.sheet = nil; await wait(1.5)
             ui.sheet = .settings
-            await wait(2); step("13_settings"); await wait(5)
+            await wait(2); await step("13_settings"); await wait(1)
             ui.sheet = nil; await wait(1.5)
             ui.sheet = .servers
-            await wait(2); step("14_servers"); await wait(5)
+            await wait(2); await step("14_servers"); await wait(1)
             ui.sheet = nil; await wait(1.5)
             ui.sheet = .help
-            await wait(2); step("15_help"); await wait(5)
+            await wait(2); await step("15_help"); await wait(1)
             ui.sheet = nil
-            step("done")
+            await step("done")
         }
     }
 }
