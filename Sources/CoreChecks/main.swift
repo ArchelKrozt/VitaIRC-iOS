@@ -184,6 +184,19 @@ struct IrcTests {
         check(s.listing == 2)
         check(s.listed.map { $0.name } == ["#vitasdk"])
 
+        // back in the app: an online link is probed, a waiting one reconnects at once
+        s.wantConnect = true
+        s.state = .online
+        Irc.resumeCheck()
+        check(s.probe && !s.reconnectNow)
+        s.probe = false
+        s.state = .waiting
+        Irc.resumeCheck()
+        check(s.reconnectNow && !s.probe)
+        s.reconnectNow = false
+        s.wantConnect = false
+        s.state = .online
+
         // the ring keeps maxMsgs
         for i in 0..<(Irc.maxMsgs + 20) { feed(":ann!u@h PRIVMSG #vita :spam \(i)") }
         check(c.msgs.count == Irc.maxMsgs)

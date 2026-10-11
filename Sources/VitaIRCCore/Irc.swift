@@ -12,6 +12,7 @@ public final class Server {
     var outq: [String] = []
     var joinAt: Int64 = 0
     var probe = false
+    var reconnectNow = false            // back in the app: skip the wait before reconnecting
     var pendingFocus = ""
     var capsLs = ""
     var capSasl = false
@@ -1155,7 +1156,7 @@ public enum Irc {
                     if locked({ s.joinAt != 0 && now >= s.joinAt }) { locked { s.joinAt = 0; doAutojoin(s) }; continue }
                     if locked({ s.probe }) {
                         locked { s.probe = false; sendRaw(s, "PING :probe") }
-                        lastRx = now - 225_000      // expect an answer within ~15 s
+                        lastRx = now - 235_000      // expect an answer within ~5 s
                         pingSent = true
                         continue
                     }
@@ -1172,13 +1173,14 @@ public enum Irc {
                 let out: [String] = locked { let o = s.outq; s.outq.removeAll(); return o }
                 for o in out { try? conn.write(o) }
             } catch {}
+            let reason = conn.closeReason
             conn.close()
             locked {
                 s.conn = nil
                 s.state = s.wantConnect ? .waiting : .off
                 s.joinAt = 0
                 for c in s.chans { c.joined = false; c.users.removeAll() }
-                status(s, .error, t("Desconectado de %s").f(cfg.host))
+                status(s, .error, t("Desconectado de %s").f(cfg.host) + (reason.isEmpty ? "" : " (\(reason))"))
             }
             if locked({ s.wantConnect }) { waitOrCancel(s, 5) }
         }
@@ -1194,7 +1196,8 @@ public enum Irc {
 
     private static func waitOrCancel(_ s: Server, _ seconds: Int) {
         let until = TimeUtil.now() + Int64(seconds) * 1000
-        while TimeUtil.now() < until && locked({ s.wantConnect }) { Thread.sleep(forTimeInterval: 0.2) }
+        while TimeUtil.now() < until && locked({ s.wantConnect && !s.reconnectNow }) { Thread.sleep(forTimeInterval: 0.2) }
+        locked { s.reconnectNow = false }
     }
 
     // MARK: - Public control
@@ -1251,7 +1254,17 @@ public enum Irc {
 
     /// After the network came back or the app returned: verify that links are alive.
     public static func resumeCheck() {
-        locked { for s in servers where s.state == .online || s.state == .registering { s.probe = true } }
+        locked {
+            for s in servers where s.wantConnect {
+                if s.state == .online || s.state == .registering { s.probe = true }      // still alive?
+                else { s.reconnectNow = true }                                          // waiting: now
+            }
+        }
+    }
+
+    /// An informative line in every connected server's window (background diagnostics...)
+    public static func noteAll(_ text: String) {
+        locked { for s in servers where s.wantConnect { status(s, .info, text) } }
     }
 
     /// Screenshot mode: a line handled as if the server sent it (never sent anywhere).

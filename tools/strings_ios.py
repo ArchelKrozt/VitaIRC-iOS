@@ -12,4 +12,13 @@ T = {
 "Ver cómo instalarla": "See how to install it",
 "sin permiso para Fotos": "no permission for Photos",
 "¡%s disponible! Pulsa para ver cómo instalarla": "%s available! Tap to see how to install it",
+"iOS suspendió la app: la conexión se revisará al volver": "iOS suspended the app: the connection will be checked on return",
+"App en segundo plano: iOS no dio tiempo extra": "App in the background: iOS gave no extra time",
+"App en segundo plano: iOS da %d s antes de suspenderla": "App in the background: iOS gives %d s before suspending it",
+"De vuelta en la app (%d s fuera): revisando la conexión": "Back in the app (%d s away): checking the connection",
+"iOS cerró la conexión": "iOS closed the connection",
+"el servidor cortó la conexión": "the server cut the connection",
+"el servidor cerró la conexión": "the server closed the connection",
+"sin red": "no network",
+"tiempo de espera agotado": "timed out",
 }

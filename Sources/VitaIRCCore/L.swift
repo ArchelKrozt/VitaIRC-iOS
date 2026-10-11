@@ -5,7 +5,7 @@ public enum L {
     nonisolated(unsafe) public static var english = false
     public static func t(_ es: String) -> String { english ? (en[es] ?? es) : es }
     private static let en: [String: String] = {
-        var d = [String: String](minimumCapacity: 978)
+        var d = [String: String](minimumCapacity: 996)
         d["» traduciendo..."] = "» translating..."
         d["▼ mensajes nuevos abajo"] = "▼ new messages below"
         d["Sin mensajes todavía."] = "No messages yet."
@@ -495,6 +495,15 @@ public enum L {
         d["Ver cómo instalarla"] = "See how to install it"
         d["sin permiso para Fotos"] = "no permission for Photos"
         d["¡%s disponible! Pulsa para ver cómo instalarla"] = "%s available! Tap to see how to install it"
+        d["iOS suspendió la app: la conexión se revisará al volver"] = "iOS suspended the app: the connection will be checked on return"
+        d["App en segundo plano: iOS no dio tiempo extra"] = "App in the background: iOS gave no extra time"
+        d["App en segundo plano: iOS da %d s antes de suspenderla"] = "App in the background: iOS gives %d s before suspending it"
+        d["De vuelta en la app (%d s fuera): revisando la conexión"] = "Back in the app (%d s away): checking the connection"
+        d["iOS cerró la conexión"] = "iOS closed the connection"
+        d["el servidor cortó la conexión"] = "the server cut the connection"
+        d["el servidor cerró la conexión"] = "the server closed the connection"
+        d["sin red"] = "no network"
+        d["tiempo de espera agotado"] = "timed out"
         return d
     }()
 }

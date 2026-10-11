@@ -15,6 +15,8 @@ final class Conn {
     private var buffer = Data()
     private var closed = false
     private(set) var certOk = true
+    /// Why the connection ended, for the message in the server window ("" = we closed it)
+    private(set) var closeReason = ""
 
     private init(_ c: NWConnection) { conn = c }
 
@@ -51,9 +53,12 @@ final class Conn {
                 ready.lock(); done = true; ready.signal(); ready.unlock()
             case .failed(let e), .waiting(let e):
                 ready.lock()
+                let wasReady = done
                 if !done { result = e; done = true; ready.signal() }
                 ready.unlock()
-                c.markClosed()
+                // after it was ready, iOS reports here a link it took away (the app was suspended,
+                // the network changed...)
+                if wasReady { c.markClosed(reason: Conn.describe(e)) } else { c.markClosed() }
             case .cancelled:
                 c.markClosed()
             default: break
@@ -82,8 +87,26 @@ final class Conn {
         return c
     }
 
-    private func markClosed() {
-        cond.lock(); closed = true; cond.broadcast(); cond.unlock()
+    private func markClosed(reason: String = "") {
+        cond.lock()
+        if !closed && closeReason.isEmpty && !reason.isEmpty { closeReason = reason }
+        closed = true
+        cond.broadcast()
+        cond.unlock()
+    }
+
+    /// Short, readable reason for a network error
+    static func describe(_ e: Error) -> String {
+        if let ne = e as? NWError, case .posix(let code) = ne {
+            switch code {
+            case .ECONNABORTED: return t("iOS cerró la conexión")
+            case .ECONNRESET: return t("el servidor cortó la conexión")
+            case .ENETDOWN, .ENETUNREACH, .EHOSTUNREACH: return t("sin red")
+            case .ETIMEDOUT: return t("tiempo de espera agotado")
+            default: return "\(code)"
+            }
+        }
+        return "\(e)"
     }
 
     private func receive() {
@@ -91,6 +114,8 @@ final class Conn {
             guard let self = self else { return }
             self.cond.lock()
             if let d = data, !d.isEmpty { self.buffer.append(d) }
+            if let e = err, !self.closed, self.closeReason.isEmpty { self.closeReason = Conn.describe(e) }
+            else if complete && !self.closed && self.closeReason.isEmpty { self.closeReason = t("el servidor cerró la conexión") }
             if complete || err != nil { self.closed = true }
             self.cond.broadcast()
             self.cond.unlock()

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1
+
+- Leaving the app: the extra background time iOS gives (about 30 s) is now requested with the
+  system's own signal, so short trips to another app don't drop the connection.
+- Back in the app: the connection is checked in 5 s instead of 15, and a dead or waiting one
+  reconnects at once (with a bouncer, what was said meanwhile comes back with its real time).
+- The server window says what happened: background time given, app suspended, why a connection
+  ended (iOS closed it, no network...).
+
 ## 1.0
 
 First version of VitaIRC for iPhone and iPad, with the features of VitaIRC 1.4 for PS Vita and

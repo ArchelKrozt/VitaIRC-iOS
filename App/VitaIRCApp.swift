@@ -69,17 +69,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Updates.check(manual: false)
 
         UNUserNotificationCenter.current().delegate = self
+        // the app's own signals (more reliable than SwiftUI's scene phase for the background time)
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { AppDelegate.enteredBackground() }
+        }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { AppDelegate.willEnterForeground() }
+        }
         if ProcessInfo.processInfo.environment["VITAIRC_DEMO"] == "1" { Demo.start() }
         else { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in } }
         return true
     }
 
+    nonisolated(unsafe) private static var leftAt: Date?
+
+    /// Only who is on screen (counters and notifications): the background time is handled below.
     @MainActor static func phaseChanged(_ p: ScenePhase) {
         switch p {
         case .active:
             Irc.appVisible = true
-            if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask); bgTask = .invalid }
-            Irc.resumeCheck()
             Irc.locked {
                 if Irc.viewSidx >= 0, Irc.viewSidx < Irc.servers.count, let c = Irc.findChanUid(Irc.servers[Irc.viewSidx], Irc.viewUid) { c.unread = 0; c.mention = 0 }
                 Irc.dirty()
@@ -87,14 +96,40 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             UIApplication.shared.applicationIconBadgeNumber = 0
         case .background:
             Irc.appVisible = false
-            // iOS gives the app some seconds before it suspends it: keep the links meanwhile
-            if bgTask == .invalid {
-                bgTask = UIApplication.shared.beginBackgroundTask(withName: "irc") {
-                    UIApplication.shared.endBackgroundTask(bgTask); bgTask = .invalid
-                }
-            }
         default: break
         }
+    }
+
+    /// iOS gives the app some seconds before it suspends it: ask for them and keep the links meanwhile.
+    @MainActor static func enteredBackground() {
+        Irc.appVisible = false
+        leftAt = Date()
+        if bgTask == .invalid {
+            bgTask = UIApplication.shared.beginBackgroundTask(withName: "irc") {
+                // time is up: iOS suspends the app now (the links will be checked on return)
+                Irc.noteAll(t("iOS suspendió la app: la conexión se revisará al volver"))
+                UIApplication.shared.endBackgroundTask(bgTask)
+                bgTask = .invalid
+            }
+        }
+        if !Irc.anyConnected() { return }
+        let left = UIApplication.shared.backgroundTimeRemaining
+        if bgTask == .invalid {
+            Irc.noteAll(t("App en segundo plano: iOS no dio tiempo extra"))
+        } else if left < 3600 {
+            Irc.noteAll(t("App en segundo plano: iOS da %d s antes de suspenderla").f(Int(left)))
+        }
+    }
+
+    /// Back in the app: dead links reconnect at once (with a bouncer, what was missed comes back).
+    @MainActor static func willEnterForeground() {
+        if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask); bgTask = .invalid }
+        if let at = leftAt, Irc.anyConnected() {
+            let secs = Int(Date().timeIntervalSince(at))
+            if secs >= 5 { Irc.noteAll(t("De vuelta en la app (%d s fuera): revisando la conexión").f(secs)) }
+        }
+        leftAt = nil
+        Irc.resumeCheck()
     }
 
     /// PM or mention in a window that isn't on screen.
