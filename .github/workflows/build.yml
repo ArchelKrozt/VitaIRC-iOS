@@ -28,7 +28,9 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project VitaIRC.xcodeproj -scheme VitaIRC -configuration Debug -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -40
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 \
+            || { grep -E "error:" build.log | sort -u | head -80; tail -20 build.log; exit 1; }
+          tail -5 build.log
 
       - name: Screenshots (demo mode in the simulator)
         run: |
