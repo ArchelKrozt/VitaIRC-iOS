@@ -13,6 +13,13 @@ public final class Server {
     var joinAt: Int64 = 0
     var probe = false
     var reconnectNow = false            // back in the app: skip the wait before reconnecting
+    var slowq: [String] = []            // paced lines (profile answers)
+    var slowBurst = 0
+    var nextSlowAt: Int64 = 0
+    var profileAnswered: [String: Int64] = [:]
+    var profileIn: [String: ProfileBuild] = [:]
+    var whoisPending = Set<String>()
+    var whoisBuild: [String: WhoisInfo] = [:]
     var pendingFocus = ""
     var capsLs = ""
     var capSasl = false
@@ -58,6 +65,10 @@ public enum IrcHooks {
     nonisolated(unsafe) public static var notify: (Server, Chan, Msg) -> Void = { _, _, _ in }
     nonisolated(unsafe) public static var toast: (String) -> Void = { _ in }
     nonisolated(unsafe) public static var beep: () -> Void = {}
+    /// A profile arrived (nil: the user didn't answer)
+    nonisolated(unsafe) public static var profile: (Int, String, Profile?) -> Void = { _, _, _ in }
+    /// A WHOIS asked with Irc.whois finished
+    nonisolated(unsafe) public static var whois: (Int, WhoisInfo) -> Void = { _, _ in }
     /// Called (on any thread) after the state changed
     nonisolated(unsafe) public static var changed: () -> Void = {}
 }
@@ -214,13 +225,14 @@ public enum Irc {
     /// Adds a message to a window (now, or at ts when replaying a log or history).
     @discardableResult
     static func addMsgAt(_ s: Server, _ c: Chan, _ type: MsgType, _ nick: String?, _ text: String, _ selfMsg: Bool,
-                         ts: Int64 = 0, msgid: String? = nil, pending: Bool = false) -> Msg {
+                         ts: Int64 = 0, msgid: String? = nil, pending: Bool = false, replyTo: String? = nil) -> Msg {
         let when = ts > 0 ? ts : TimeUtil.now()
         if c.type != .status && type != .date && TimeUtil.ymd(when) != c.lastYmd { dateSep(c, when) }
         let f = IrcText.parse(text)
         c.nextId += 1
         let m = Msg(c.nextId, type, nick ?? "", String(f.text.prefix(1000)), f.spans, selfMsg, when, msgid)
         m.pending = pending
+        m.replyTo = replyTo
         pushMsg(c, m)
         let visible = appVisible && viewSidx == s.idx && viewUid == c.uid
         if !pending { History.log(s, c, m) }
@@ -252,7 +264,8 @@ public enum Irc {
     static func addMsg(_ s: Server, _ c: Chan, _ type: MsgType, _ nick: String?, _ text: String, _ selfMsg: Bool = false, line: Line? = nil) -> Msg {
         let ts = line?.tags["time"].flatMap { TimeUtil.parseIso($0) } ?? 0
         let id = line?.tags["msgid"].flatMap { $0.isEmpty ? nil : $0 }
-        return addMsgAt(s, c, type, nick, text, selfMsg, ts: ts, msgid: id)
+        let reply = line?.tags["+draft/reply"].flatMap { $0.isEmpty ? nil : $0 }
+        return addMsgAt(s, c, type, nick, text, selfMsg, ts: ts, msgid: id, replyTo: reply)
     }
 
     private static func status(_ s: Server, _ type: MsgType, _ text: String) { addMsg(s, s.status, type, nil, text) }
@@ -334,10 +347,13 @@ public enum Irc {
         return out
     }
 
-    private static func sendText(_ s: Server, _ target: String, _ c: Chan?, _ text: String, _ action: Bool) {
-        for chunk in splitText(text) {
-            sendRaw(s, action ? "PRIVMSG \(target) :\u{01}ACTION \(chunk)\u{01}" : "PRIVMSG \(target) :\(chunk)")
-            if let c = c { addMsg(s, c, action ? .action : .msg, s.nick, chunk, true) }
+    private static func sendText(_ s: Server, _ target: String, _ c: Chan?, _ text: String, _ action: Bool, replyTo: String? = nil) {
+        // a reply needs client tags; without them the text already starts with "nick: "
+        let tag = replyTo.flatMap { s.capTags ? "@+draft/reply=\(Line.escape($0)) " : nil } ?? ""
+        for (i, chunk) in splitText(text).enumerated() {
+            let head = i == 0 ? tag : ""
+            sendRaw(s, head + (action ? "PRIVMSG \(target) :\u{01}ACTION \(chunk)\u{01}" : "PRIVMSG \(target) :\(chunk)"))
+            if let c = c { addMsgAt(s, c, action ? .action : .msg, s.nick, chunk, true, replyTo: i == 0 ? replyTo : nil) }
         }
     }
 
@@ -375,13 +391,16 @@ public enum Irc {
         dirty()
     }
 
-    public static func sendPrivmsg(_ sidx: Int, _ chanUid: Int64, _ text: String) {
+    public static func sendPrivmsg(_ sidx: Int, _ chanUid: Int64, _ text: String, replyTo: String? = nil) {
         locked {
             guard sidx < servers.count, let c = findChanUid(servers[sidx], chanUid), c.type != .status else { return }
             let s = servers[sidx]
-            if s.state != .online { queueOffline(s, c, text, false) } else { sendText(s, c.name, c, text, false) }
+            if s.state != .online { queueOffline(s, c, text, false) } else { sendText(s, c.name, c, text, false, replyTo: replyTo) }
         }
     }
+
+    /// Takes the reply that was waiting for a translated message.
+    static func takeReplyOut(_ c: Chan) -> String? { let r = c.replyOut; c.replyOut = nil; return r }
 
     private static let helpLines = [
         "Comandos disponibles:",
@@ -402,11 +421,12 @@ public enum Irc {
     }
 
     /// Text typed into a window: a command, or a message.
-    public static func userInput(_ sidx: Int, _ chanUid: Int64, _ input: String) {
-        locked { userInputLocked(sidx, chanUid, input) }
+    /// replyTo: msgid of the message this one answers (only for plain messages)
+    public static func userInput(_ sidx: Int, _ chanUid: Int64, _ input: String, replyTo: String? = nil) {
+        locked { userInputLocked(sidx, chanUid, input, replyTo) }
     }
 
-    private static func userInputLocked(_ sidx: Int, _ chanUid: Int64, _ input: String) {
+    private static func userInputLocked(_ sidx: Int, _ chanUid: Int64, _ input: String, _ replyTo: String? = nil) {
         let text = input.trimmed
         guard !text.isEmpty, sidx >= 0, sidx < servers.count else { return }
         let s = servers[sidx]
@@ -416,8 +436,8 @@ public enum Irc {
             let body = text.first == "/" ? String(text.dropFirst()) : text
             if c.type == .status { addMsg(s, c, .error, nil, t("Esta es la ventana del servidor. Usa /join #canal o /help.")) }
             else if s.state != .online { queueOffline(s, c, body, false) }
-            else if c.transOut && IrcHooks.translationReady() && !IrcText.shouldSkipTranslation(body) { IrcHooks.translateOut(s, c, body) }
-            else { sendText(s, c.name, c, body, false) }
+            else if c.transOut && IrcHooks.translationReady() && !IrcText.shouldSkipTranslation(body) { c.replyOut = replyTo; IrcHooks.translateOut(s, c, body) }
+            else { sendText(s, c.name, c, body, false, replyTo: replyTo) }
             return
         }
         let afterSlash = text.dropFirst()
@@ -581,7 +601,9 @@ public enum Irc {
         guard let b = historyBatch(s, l) else { return false }
         let f = IrcText.parse(text)
         let ts = l.tags["time"].flatMap { TimeUtil.parseIso($0) } ?? TimeUtil.now()
-        b.msgs.append(Msg(0, type, nick, String(f.text.prefix(1000)), f.spans, isMe(s, nick), ts, l.tags["msgid"].flatMap { $0.isEmpty ? nil : $0 }))
+        let m = Msg(0, type, nick, String(f.text.prefix(1000)), f.spans, isMe(s, nick), ts, l.tags["msgid"].flatMap { $0.isEmpty ? nil : $0 })
+        m.replyTo = l.tags["+draft/reply"].flatMap { $0.isEmpty ? nil : $0 }
+        b.msgs.append(m)
         return true
     }
 
@@ -767,6 +789,7 @@ public enum Irc {
         case "VERSION": sendRaw(s, "NOTICE \(nick) :\u{01}VERSION \(ctcpVersion)\u{01}")
         case "PING": sendRaw(s, "NOTICE \(nick) :\u{01}PING \(arg)\u{01}")
         case "TIME": sendRaw(s, "NOTICE \(nick) :\u{01}TIME \(TimeUtil.hhmm(TimeUtil.now()))\u{01}")
+        case "VPROFILE": answerProfile(s, nick)
         default: break
         }
     }
@@ -796,6 +819,10 @@ public enum Irc {
             return
         case "NOTICE":
             guard l.p.count >= 2 else { return }
+            if l.p[1].hasPrefix("\u{01}VPROFILE "), let n = l.nick {      // a profile answer: never shown, never "flood"
+                if !isIgnored(n) && historyBatch(s, l) == nil { profileLine(s, n, String(l.p[1].dropFirst(10)).substringBefore("\u{01}")) }
+                return
+            }
             let target = stripStatusmsg(l.p[0])
             let nick = l.nick
             if let n = nick, isIgnored(n) || (isMe(s, target) && s.state == .online && !n.contains(".") && pmFlooding(s, n)) { return }
@@ -1065,6 +1092,17 @@ public enum Irc {
             status(s, .error, t("SASL falló: %s").f(last))
             if num == 904 { status(s, .error, t("Revisa la cuenta y la contraseña en Servidores. Se intentará con NickServ.")) }
             sendRaw(s, "CAP END")
+        case 311, 312, 313, 317, 319, 330, 338, 378, 671, 301 where l.p.count >= 3 && s.whoisPending.contains(l.p[1].lowercased()):
+            whoisField(s, num, l)
+        case 318 where l.p.count >= 2 && s.whoisPending.contains(l.p[1].lowercased()):
+            let k = l.p[1].lowercased()
+            s.whoisPending.remove(k)
+            IrcHooks.whois(s.idx, s.whoisBuild.removeValue(forKey: k) ?? WhoisInfo(nick: l.p[1], found: false))
+        case 401 where l.p.count >= 2 && s.whoisPending.contains(l.p[1].lowercased()):
+            let k = l.p[1].lowercased()
+            s.whoisPending.remove(k)
+            s.whoisBuild.removeValue(forKey: k)
+            IrcHooks.whois(s.idx, WhoisInfo(nick: l.p[1], found: false))
         default:
             // everything else: show the human-readable part
             let b = l.p.dropFirst().joined(separator: " ")
@@ -1101,6 +1139,8 @@ public enum Irc {
         s.capTags = false; s.capBatch = false; s.capHistory = false
         s.historyMax = 0; s.listMask = false; s.filehost = ""
         s.listing = 0; s.listSkip = 0
+        s.slowq.removeAll(); s.slowBurst = 0
+        s.profileIn.removeAll(); s.whoisPending.removeAll(); s.whoisBuild.removeAll()
         s.batches.removeAll()
         for c in s.chans { c.histReq = .none; c.histEnd = false }
     }
@@ -1153,6 +1193,15 @@ public enum Irc {
                     let out: [String] = locked { let o = s.outq; s.outq.removeAll(); return o }
                     for o in out { try conn.write(o) }
                     let now = TimeUtil.now()
+                    // paced lines: the first few at once, then one every 800 ms
+                    if let line: String = locked({
+                        if s.slowq.isEmpty { s.slowBurst = 0; return nil }
+                        if s.slowBurst >= 3 && now < s.nextSlowAt { return nil }
+                        s.slowBurst += 1
+                        s.nextSlowAt = now + 800
+                        return s.slowq.removeFirst()
+                    }) { try conn.write(line); continue }
+                    locked { profileTimeouts(s, now) }
                     if locked({ s.joinAt != 0 && now >= s.joinAt }) { locked { s.joinAt = 0; doAutojoin(s) }; continue }
                     if locked({ s.probe }) {
                         locked { s.probe = false; sendRaw(s, "PING :probe") }
@@ -1260,6 +1309,92 @@ public enum Irc {
                 else { s.reconnectNow = true }                                          // waiting: now
             }
         }
+    }
+
+    // MARK: - Profiles (VPROFILE) and WHOIS cards
+
+    /// Asks a user for their VitaIRC profile; the answer arrives through IrcHooks.profile.
+    public static func requestProfile(_ sidx: Int, _ nick: String) {
+        locked {
+            guard sidx < servers.count, servers[sidx].state == .online else { IrcHooks.profile(sidx, nick, nil); return }
+            let s = servers[sidx]
+            s.profileIn[nick.lowercased()] = ProfileBuild(nick)
+            sendRaw(s, "PRIVMSG \(nick) :\u{01}VPROFILE\u{01}")
+        }
+    }
+
+    private static func answerProfile(_ s: Server, _ nick: String) {
+        let k = nick.lowercased(), now = TimeUtil.now()
+        if let at = s.profileAnswered[k], now - at < 30_000 { return }
+        if s.profileAnswered.count > 64 { s.profileAnswered.removeAll() }
+        s.profileAnswered[k] = now
+        for l in MyProfile.answerLines() where s.slowq.count < 64 { s.slowq.append("NOTICE \(nick) :\u{01}VPROFILE \(l)\u{01}\r\n") }
+    }
+
+    private static func profileLine(_ s: Server, _ nick: String, _ body: String) {
+        let k = nick.lowercased()
+        guard let b = s.profileIn[k] else { return }          // not asked for: dropped
+        b.lastAt = TimeUtil.now()
+        let type = body.substringBefore(" ")
+        let data = body.contains(" ") ? body.substringAfter(" ") : ""
+        switch type {
+        case "BEGIN": b.started = true
+        case "NONE":
+            s.profileIn.removeValue(forKey: k)
+            var p = Profile(nick: nick); p.none = true
+            IrcHooks.profile(s.idx, nick, p)
+        case "NAME" where b.started: b.p.name = String(data.prefix(MyProfile.maxName))
+        case "BIO" where b.started: if b.p.bio.count < MyProfile.maxBio + 40 { b.p.bio += data }
+        case "AVATAR" where b.started: if b.avatarB64.count < 24_000 { b.avatarB64 += data }
+        case "FAV" where b.started:
+            let f = data.split(separator: " ").map(String.init)
+            if f.count >= 2, let e = Int(f[0]), (0...2).contains(e), b.p.favs.count < MyProfile.maxFavs {
+                let thumb = f.count > 2 && f[2] != "-" && f[2].hasPrefix("https://") ? f[2] : ""
+                b.p.favs.append(ProfileFav(engine: e, id: f[1], thumb: thumb))
+            }
+        case "END" where b.started:
+            s.profileIn.removeValue(forKey: k)
+            b.p.avatar = Data(base64Encoded: b.avatarB64) ?? Data()
+            IrcHooks.profile(s.idx, nick, b.p)
+        default: break
+        }
+    }
+
+    /// No BEGIN after 25 s, or not finished after 60 s: the user doesn't answer.
+    private static func profileTimeouts(_ s: Server, _ now: Int64) {
+        for (k, b) in s.profileIn where (!b.started && now - b.askedAt > 25_000) || now - b.askedAt > 60_000 {
+            s.profileIn.removeValue(forKey: k)
+            IrcHooks.profile(s.idx, b.p.nick, nil)
+        }
+    }
+
+    /// WHOIS shown as a card (its lines don't go to the chat).
+    public static func whois(_ sidx: Int, _ nick: String) {
+        locked {
+            guard sidx < servers.count, servers[sidx].state == .online else { return }
+            let s = servers[sidx]
+            s.whoisPending.insert(nick.lowercased())
+            s.whoisBuild[nick.lowercased()] = WhoisInfo(nick: nick)
+            sendRaw(s, "WHOIS \(nick) \(nick)")       // asked twice: the idle time comes from the user's server
+        }
+    }
+
+    private static func whoisField(_ s: Server, _ num: Int, _ l: Line) {
+        let k = l.p[1].lowercased()
+        var w = s.whoisBuild[k] ?? WhoisInfo(nick: l.p[1])
+        switch num {
+        case 311 where l.p.count >= 6: w.user = l.p[2]; w.host = l.p[3]; w.realname = IrcText.strip(l.last)
+        case 312: w.server = l.p[2]; w.serverInfo = l.p.count > 3 ? l.last : ""
+        case 313: w.oper = true
+        case 317: w.idleSecs = Int(l.p[2]) ?? -1; w.signon = l.p.count > 4 ? (Int64(l.p[3]) ?? 0) * 1000 : 0
+        case 319: w.channels += l.last.split(separator: " ").map(String.init)
+        case 330: w.account = l.p[2]
+        case 338, 378: w.actualHost = l.last.replacingOccurrences(of: "is connecting from ", with: "")
+        case 671: w.secure = true
+        case 301: w.away = l.last
+        default: break
+        }
+        s.whoisBuild[k] = w
     }
 
     /// An informative line in every connected server's window (background diagnostics...)

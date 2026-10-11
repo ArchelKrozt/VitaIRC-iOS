@@ -31,6 +31,7 @@ public final class Msg {
     public var trans: String?
     public var transState = TransState.none
     public var reacts: [React]?
+    public var replyTo: String?         // msgid this message answers (IRCv3 +draft/reply)
 
     init(_ id: Int64, _ type: MsgType, _ nick: String, _ text: String, _ spans: [FmtSpan], _ selfMsg: Bool, _ ts: Int64, _ msgid: String?) {
         self.id = id; self.type = type; self.nick = nick; self.text = text; self.spans = spans
@@ -69,6 +70,7 @@ public final class Chan {
     var histSince: Int64 = 0
     public var histEnd = false
     public var draft = ""
+    var replyOut: String?               // reply of a message waiting for its translation
     var log: FileHandle?
 
     init(_ uid: Int64, _ type: ChanType, _ name: String) { self.uid = uid; self.type = type; self.name = name }

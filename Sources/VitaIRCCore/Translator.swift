@@ -8,7 +8,7 @@ public enum Translator {
     nonisolated(unsafe) public private(set) static var usage: (today: Int, total: Int, requests: Int) = (0, 0, 0)
     nonisolated(unsafe) private static var usageDate = ""
 
-    private struct Job { let outgoing: Bool; let sidx: Int; let uid: Int64; let mid: Int64; let text: String; let lang: String }
+    private struct Job { let outgoing: Bool; let sidx: Int; let uid: Int64; let mid: Int64; let text: String; let lang: String; var replyTo: String? = nil }
 
     private static let lock = NSCondition()
     nonisolated(unsafe) private static var jobs: [Job] = []
@@ -52,7 +52,7 @@ public enum Translator {
     /// My message: sent translated once ready (or as it was, on error).
     public static func requestOut(_ s: Server, _ c: Chan, _ text: String) {
         lock.lock()
-        jobs.insert(Job(outgoing: true, sidx: s.idx, uid: c.uid, mid: 0, text: text, lang: Config.langOut), at: 0)
+        jobs.insert(Job(outgoing: true, sidx: s.idx, uid: c.uid, mid: 0, text: text, lang: Config.langOut, replyTo: Irc.takeReplyOut(c)), at: 0)
         lock.signal(); lock.unlock()
     }
 
@@ -65,12 +65,12 @@ public enum Translator {
         defer { AppEvents.busy("") }
         do {
             let r = try translate(j.text, j.lang, j.outgoing)
-            if j.outgoing { Irc.sendPrivmsg(j.sidx, j.uid, r.ifEmpty(j.text)) } else { putCache(key, r); finishIn(j, r) }
+            if j.outgoing { Irc.sendPrivmsg(j.sidx, j.uid, r.ifEmpty(j.text), replyTo: j.replyTo) } else { putCache(key, r); finishIn(j, r) }
         } catch {
             let msg = (error as? HttpError)?.message ?? error.localizedDescription
             if j.outgoing {
                 AppEvents.toast(t("No se pudo traducir (%s). Enviado sin traducir.").f(msg.ifEmpty(t("vacío"))))
-                Irc.sendPrivmsg(j.sidx, j.uid, j.text)
+                Irc.sendPrivmsg(j.sidx, j.uid, j.text, replyTo: j.replyTo)
             } else {
                 finishIn(j, nil)
                 AppEvents.toast(t("Traducción: %s").f(msg))

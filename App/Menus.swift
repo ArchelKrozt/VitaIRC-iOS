@@ -145,7 +145,8 @@ struct MessageSheet: View {
                         item((media ? t("Ver imagen:") : t("Abrir en el navegador:")) + " " + u, "link") { Actions.openLink(u) }
                     }
                     if m.chatty && !m.nick.isEmpty && !m.selfMsg {
-                        item(t("Responder a %s").f(m.nick), "arrowshape.turn.up.left") { model.appendToInput(c.sidx, c.uid, "\(m.nick): ") }
+                        item(t("Responder a %s").f(m.nick), "arrowshape.turn.up.left") { startReply(c, m) }
+                        item(t("Ver perfil y WHOIS de %s").f(m.nick), "person.crop.circle") { UiState.shared.userCard = UserCardTarget(sidx: c.sidx, nick: m.nick) }
                         item(t("Mensaje privado a %s").f(m.nick), "person") { Irc.userInput(c.sidx, c.uid, "/query \(m.nick)") }
                         let ign = Irc.isIgnored(m.nick)
                         item((ign ? t("Dejar de ignorar a %s") : t("Ignorar a %s")).f(m.nick), "hand.raised") {
@@ -190,12 +191,18 @@ struct UsersSheet: View {
         NavigationStack {
             if let c = model.chan {
                 List(c.users) { u in
-                    Button { user = u } label: {
+                    Button {
+                        // the user's card (WHOIS and profile); operators keep the long-press menu
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { UiState.shared.userCard = UserCardTarget(sidx: c.sidx, nick: u.nick) }
+                    } label: {
                         HStack {
                             Text((u.prefix.map(String.init) ?? "") + u.nick).foregroundColor(u.away ? C.dim : C.nick(u.nick))
                             if u.away { Text("(" + t("ausente") + ")").foregroundColor(C.faint).font(.caption) }
                         }
-                    }.listRowBackground(C.panel)
+                    }
+                    .listRowBackground(C.panel)
+                    .contextMenu { Button { user = u } label: { Label(t("Más opciones..."), systemImage: "ellipsis") } }
                 }
                 .scrollContentBackground(.hidden).background(C.bg)
                 .navigationTitle(t("Usuarios del canal (%d)").f(c.users.count)).navigationBarTitleDisplayMode(.inline)

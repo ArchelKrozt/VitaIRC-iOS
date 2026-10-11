@@ -190,7 +190,8 @@ struct MessageList: View {
                         Text(t("Cargando mensajes anteriores...")).font(.system(size: fs(13))).foregroundColor(C.trans).padding(8)
                     }
                     ForEach(c.msgs) { m in
-                        MessageRow(m: m, flash: flash == m.id, onTap: { onTap(m) }) { e in react(c, m, e) }
+                        MessageRow(m: m, flash: flash == m.id, onTap: { onTap(m) }, onReact: { e in react(c, m, e) },
+                                   onReply: { startReply(c, m) }, onQuote: { id in model.jump = (c.uid, id) })
                             .id(m.id)
                             .onAppear { if m.id == c.msgs.first?.id { requestOlder() } }
                     }
@@ -230,6 +231,12 @@ struct MessageList: View {
     private func requestOlder() {
         Irc.locked { if c.sidx < Irc.servers.count, let ch = Irc.findChanUid(Irc.servers[c.sidx], c.uid) { Irc.requestOlder(Irc.servers[c.sidx], ch) } }
     }
+}
+
+/// Starts answering a message from the input bar.
+@MainActor func startReply(_ c: ChanUi, _ m: MsgUi) {
+    guard m.chatty, !m.nick.isEmpty else { return }
+    AppModel.shared.replyTarget = ReplyTarget(sidx: c.sidx, uid: c.uid, msgid: m.msgid, nick: m.nick, text: m.text)
 }
 
 @MainActor func react(_ c: ChanUi, _ m: MsgUi, _ emoji: String) {
@@ -272,6 +279,19 @@ struct InputBar: View {
                     }.padding(.horizontal, 10).padding(.vertical, 5)
                 }
             }
+            if let r = model.replyTarget, r.sidx == c.sidx, r.uid == c.uid {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrowshape.turn.up.left.fill").foregroundColor(C.accent).font(.system(size: 13))
+                    RoundedRectangle(cornerRadius: 1.5).fill(C.nick(r.nick)).frame(width: 3, height: 30)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(t("Respondiendo a %s").f(r.nick)).font(.system(size: 12, weight: .semibold)).foregroundColor(C.nick(r.nick))
+                        Text(r.text).font(.system(size: 12)).foregroundColor(C.dim).lineLimit(1)
+                    }
+                    Spacer()
+                    Button { model.replyTarget = nil } label: { Image(systemName: "xmark.circle.fill").foregroundColor(C.faint) }
+                }
+                .padding(.horizontal, 12).padding(.top, 8)
+            }
             HStack(spacing: 6) {
                 if c.type != .status {
                     ImagesMenu(c: c, photo: $photo, showCamera: $showCamera)
@@ -296,6 +316,7 @@ struct InputBar: View {
         .onAppear { text = c.draft }
         .onChange(of: c.uid) { _ in text = c.draft }
         .onChange(of: text) { v in model.saveDraft(c.sidx, c.uid, v) }
+        .onChange(of: model.replyTarget) { r in if r != nil { focused = true } }
         .onChange(of: model.draftOverride?.1) { _ in
             if let (w, _, d) = model.draftOverride, w == winId { text = d; focused = true }
         }
@@ -319,7 +340,18 @@ struct InputBar: View {
     private func send() {
         // pasted text with several lines goes out one line at a time
         let lines = text.components(separatedBy: .newlines).map { $0.trimmed }.filter { !$0.isEmpty }
-        for l in lines { Sent.add(l); Irc.userInput(c.sidx, c.uid, l) }
+        // the first line answers the quoted message: with tags as a real reply, otherwise "nick: text"
+        var reply: String?
+        var prefix = ""
+        if let r = model.replyTarget, r.sidx == c.sidx, r.uid == c.uid, !lines.isEmpty {
+            if c.capTags, let id = r.msgid { reply = id } else if !(lines[0].hasPrefix(r.nick)) { prefix = "\(r.nick): " }
+            model.replyTarget = nil
+        }
+        for (i, l) in lines.enumerated() {
+            let line = i == 0 && !l.hasPrefix("/") ? prefix + l : l
+            Sent.add(line)
+            Irc.userInput(c.sidx, c.uid, line, replyTo: i == 0 ? reply : nil)
+        }
         if !lines.isEmpty { text = ""; model.saveDraft(c.sidx, c.uid, "") }
         focused = true
     }

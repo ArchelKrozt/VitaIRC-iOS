@@ -60,6 +60,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         AppEvents.update = { u in DispatchQueue.main.async { model.update = u } }
         Booru.changed = { model.changed() }
+        IrcHooks.profile = { sidx, nick, p in
+            DispatchQueue.main.async {
+                let k = userKey(sidx, nick)
+                if let p = p { model.profiles[k] = p; model.profileFailed.remove(k) } else { model.profileFailed.insert(k) }
+            }
+        }
+        IrcHooks.whois = { sidx, w in DispatchQueue.main.async { model.whoisCards[userKey(sidx, w.nick)] = w } }
+        MyProfile.load()
 
         Translator.start()
         Booru.loadFavorites()
@@ -220,12 +228,15 @@ struct RootView: View {
                 case .quick: QuickSheet()
                 case .uploads: UploadsSheet()
                 case .links: LinksSheet()
+                case .myProfile: MyProfileView()
                 case .editServer(let i): EditServerView(idx: i, cfg: Config.servers.indices.contains(i) ? Config.servers[i] : Config.defaultServer())
                 }
             }
             .environmentObject(model).environmentObject(ui).environmentObject(dialogs)
             .preferredColorScheme(.dark)
         }
+        .overlay { if let v = ui.miniVideo { MiniPlayer(target: v).id(v.id).environmentObject(ui) } }
+        .sheet(item: $ui.userCard) { UserCardView(target: $0).environmentObject(model).environmentObject(ui).preferredColorScheme(.dark) }
         .fullScreenCover(item: $ui.image) { ImageViewer(target: $0).environmentObject(model) }
         .fullScreenCover(item: $ui.video) { VideoView(target: $0) }
         .sheet(item: $ui.choose) { ChooseSheet(ask: $0).preferredColorScheme(.dark) }

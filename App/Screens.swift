@@ -143,6 +143,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button { UiState.shared.sheet = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { UiState.shared.sheet = .myProfile } } label: {
+                        HStack(spacing: 12) {
+                            AvatarView(data: (try? Data(contentsOf: MyProfile.avatarBigFile)) ?? MyProfile.avatar, nick: Config.servers.first?.nick ?? "?", size: 48)
+                            VStack(alignment: .leading) {
+                                Text(MyProfile.name.isEmpty ? t("Mi perfil") : MyProfile.name).foregroundColor(C.text).font(.headline)
+                                Text(t("Foto, biografía y favoritos públicos")).foregroundColor(C.dim).font(.caption)
+                            }
+                        }
+                    }
+                }
                 Section(t("Traducción")) {
                     Picker(t("Traductor"), selection: bind(Config.trProvider) { v in
                         Config.trProvider = v

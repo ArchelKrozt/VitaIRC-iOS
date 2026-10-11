@@ -59,6 +59,9 @@ public enum Previews {
         return .page
     }
 
+    /// Animated "GIF" that is really a short video (Imgur's .gifv): plays inline, muted, looping
+    public static func isLoop(_ url: String) -> Bool { ext(url) == "gifv" }
+
     /// Imgur's .gifv is an MP4
     public static func videoUrl(_ url: String) -> String { ext(url) == "gifv" ? url.substringBeforeLast(".") + ".mp4" : url }
 

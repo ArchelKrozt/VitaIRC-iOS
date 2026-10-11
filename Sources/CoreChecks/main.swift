@@ -305,6 +305,96 @@ struct ServiceChecks {
     }
 }
 
+/// Replies, profiles over IRC, WHOIS cards and image authors.
+struct NewFeatureChecks {
+    func run() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vitairc-nf-\(UUID().uuidString)")
+        Config.setup(dir: dir)
+        var cfg = ServerCfg(); cfg.host = "bnc.example"; cfg.nick = "me"; cfg.channels = ""
+        Config.servers = [cfg]
+        Irc.servers.removeAll()
+        Irc.syncFromConfig()
+        let s = Irc.servers[0]
+        s.nick = "me"; s.state = .online; s.capTags = true
+        func feed(_ l: String) { Irc.locked { Irc.handleLine(s, l) } }
+        func out(_ needle: String) -> Bool { s.outq.contains { $0.contains(needle) } || s.slowq.contains { $0.contains(needle) } }
+
+        // replies: received with the tag, sent with it
+        let c = Irc.locked { Irc.getChan(s, "#vita", .channel) }
+        feed("@msgid=m1 :ana!u@h PRIVMSG #vita :¿alguien probó la 1.4?")
+        feed("@msgid=m2;+draft/reply=m1 :bob!u@h PRIVMSG #vita :sí, funciona")
+        check(c.findMsgId("m2")?.replyTo == "m1")
+        Irc.userInput(0, c.uid, "a mí también", replyTo: "m1")
+        check(out("@+draft/reply=m1 PRIVMSG #vita :a mí también"))
+        check(c.msgs.last?.replyTo == "m1" && c.msgs.last?.selfMsg == true)
+        s.capTags = false; s.outq.removeAll()
+        Irc.userInput(0, c.uid, "sin etiquetas", replyTo: "m1")
+        check(out("PRIVMSG #vita :sin etiquetas") && !out("@+draft"))
+        s.capTags = true; s.outq.removeAll()
+
+        // my profile answers a request, paced, and another app reads it back
+        MyProfile.name = "Diego"
+        MyProfile.bio = "Fan de la Vita 🎮. Programo homebrew y juego en línea con amigos, hablando de todo un poco." + String(repeating: " más texto", count: 15)
+        MyProfile.share = true
+        try Data((0..<2500).map { UInt8($0 % 251) }).write(to: MyProfile.avatarFile)
+        let fav = BPost(engine: 1, id: "123", rating: "g", w: 10, h: 10, ext: "jpg", fileSize: 1, thumbUrl: "https://cdn.donmai.us/t.jpg", viewUrl: "v", fileUrl: "f", tags: "cat")
+        Booru.toggleFav(fav, thumb: nil)
+        MyProfile.setPublic(fav.key, true)
+        feed(":ana!u@h PRIVMSG me :\u{01}VPROFILE\u{01}")
+        let answer = s.slowq
+        check(answer.first?.hasPrefix("NOTICE ana :\u{01}VPROFILE BEGIN 1") == true && answer.last?.contains("VPROFILE END") == true)
+        check(answer.allSatisfy { $0.utf8.count <= 512 })
+        feed(":ana!u@h PRIVMSG me :\u{01}VPROFILE\u{01}")
+        check(s.slowq.count == answer.count)                      // once every 30 s
+        // the same lines as another app receives them
+        nonisolated(unsafe) var got: Profile?
+        IrcHooks.profile = { _, _, p in got = p }
+        Irc.requestProfile(0, "diego")
+        check(out("PRIVMSG diego :\u{01}VPROFILE\u{01}"))
+        for l in answer {
+            let body = l.substringAfter(":").trimmingCharacters(in: .newlines)
+            feed(":diego!u@h NOTICE me :" + body)
+        }
+        check(got?.name == "Diego" && got?.bio.hasPrefix("Fan de la Vita 🎮.") == true && got?.avatar.count == 2500)
+        check(got?.favs.first?.id == "123" && got?.favs.first?.thumb == "https://cdn.donmai.us/t.jpg")
+        check(Irc.findChan(s, "diego") == nil && !s.status.msgs.contains { $0.text.contains("VPROFILE") })
+        MyProfile.share = false
+        s.profileAnswered.removeAll(); s.slowq.removeAll()
+        feed(":ana!u@h PRIVMSG me :\u{01}VPROFILE\u{01}")
+        check(s.slowq.count == 1 && s.slowq[0].contains("VPROFILE NONE"))
+        // pacing: 3 lines at once, then one every 800 ms
+        s.slowq = (0..<6).map { "NOTICE x :\($0)\r\n" }
+
+        // WHOIS as a card
+        nonisolated(unsafe) var card: WhoisInfo?
+        IrcHooks.whois = { _, w in card = w }
+        Irc.whois(0, "ana")
+        let before = s.status.msgs.count
+        feed(":srv 311 me ana ~ana host.example * :Ana López")
+        feed(":srv 319 me ana :@#vita #henkaku")
+        feed(":srv 312 me ana tantalum.libera.chat :Libera")
+        feed(":srv 317 me ana 125 1791415800 :seconds idle, signon time")
+        feed(":srv 330 me ana anaacct :is logged in as")
+        feed(":srv 671 me ana :is using a secure connection")
+        feed(":srv 318 me ana :End of /WHOIS list.")
+        check(card?.realname == "Ana López" && card?.channels == ["@#vita", "#henkaku"] && card?.idleSecs == 125 && card?.account == "anaacct" && card?.secure == true)
+        check(s.status.msgs.count == before)
+        Irc.whois(0, "ghost")
+        feed(":srv 401 me ghost :No such nick/channel")
+        check(card?.nick == "ghost" && card?.found == false)
+
+        // image authors
+        let dan = Booru.parse(Booru.danbooru, Data(#"[{"id":7,"rating":"g","image_width":1,"image_height":1,"file_ext":"png","file_size":5,"preview_file_url":"https://t","large_file_url":"https://l","file_url":"https://f","tag_string":"cat","tag_string_artist":"foo_bar banned_artist"}]"#.utf8), false)
+        check(dan.posts.first?.artist == "foo bar")
+        check(Booru.chatText("https://f", dan.posts[0]) == "https://f 🎨 foo bar")
+        let sk = Booru.parse(Booru.sankaku, Data(#"{"data":[{"id":"9","rating":"s","width":1,"height":1,"file_ext":"jpg","file_size":5,"sample_url":"https://s","file_url":"https://f","tags":[{"tagName":"cat","type":0},{"tagName":"some_artist","type":1}]}],"meta":{"next":null}}"#.utf8), false)
+        check(sk.posts.first?.artist == "some artist")
+        Booru.loadFavorites()
+        check(Booru.favorites.first?.key == "1/123")
+        IrcHooks.profile = { _, _, _ in }; IrcHooks.whois = { _, _ in }
+    }
+}
+
 // MARK: - runner
 
 nonisolated(unsafe) var failures = 0
@@ -325,6 +415,7 @@ run("capsHistoryReactionsQueue") { IrcTests().capsHistoryReactionsQueue() }
 run("selfMessageKeepsWholeText") { IrcTests().selfMessageKeepsWholeText() }
 run("historyRoundTrip") { try IrcTests().historyRoundTrip() }
 run("configRoundTrip") { try IrcTests().configRoundTrip() }
+run("newFeatures") { try NewFeatureChecks().run() }
 run("live") { LiveTests().connectsSearchesAndDisconnects() }
 run("services") { try ServiceChecks().run() }
 print(failures == 0 ? "ALL CORE CHECKS PASSED" : "\(failures) CHECKS FAILED")

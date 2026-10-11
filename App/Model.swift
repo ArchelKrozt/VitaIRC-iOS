@@ -19,8 +19,16 @@ struct MsgUi: Identifiable, Equatable {
     let transState: TransState
     let reacts: [ReactUi]
     let canReact: Bool
+    let msgid: String?
+    let reply: QuoteUi?                // the message this one answers
     var chatty: Bool { type == .msg || type == .action || type == .notice }
 }
+
+/// What a reply shows of the message it answers (id 0: not in this window any more)
+struct QuoteUi: Equatable { let id: Int64; let nick: String; let text: String }
+
+/// The message being answered from the input bar
+struct ReplyTarget: Equatable { let sidx: Int; let uid: Int64; let msgid: String?; let nick: String; let text: String }
 
 struct WinUi: Identifiable, Hashable {
     let sidx: Int
@@ -55,7 +63,11 @@ struct ChanUi: Equatable {
     let myPrefix: Character?
     let canHistory: Bool
     let listMask: Bool
+    let capTags: Bool
 }
+
+/// Key of a user on a server, for profiles and WHOIS cards
+func userKey(_ sidx: Int, _ nick: String) -> String { "\(sidx)/\(nick.lowercased())" }
 
 /// Immutable copies of the IRC state for SwiftUI, rebuilt after changes (at most ~20 times a second).
 @MainActor
@@ -72,6 +84,10 @@ final class AppModel: ObservableObject {
     @Published var draftOverride: (String, Int64, String)?   // (window id, nonce, text) put into the input
     @Published var jump: (Int64, Int64)?                     // window uid, message id to show
     @Published var revision: Int64 = 0
+    @Published var replyTarget: ReplyTarget?
+    @Published var profiles: [String: Profile] = [:]          // userKey -> received profile
+    @Published var profileFailed = Set<String>()                // asked, no answer
+    @Published var whoisCards: [String: WhoisInfo] = [:]       // userKey -> WHOIS
 
     private var pending = false
     private var toastTask: Task<Void, Never>?
@@ -104,14 +120,19 @@ final class AppModel: ObservableObject {
                               joined: c.joined, transIn: c.transIn, transOut: c.transOut, transLang: c.transLang, muted: c.muted,
                               loadingOlder: c.histReq == .before,
                               msgs: c.msgs.map { m in
-                                  MsgUi(id: m.id, type: m.type, nick: m.nick, text: m.text, spans: m.spans, selfMsg: m.selfMsg, time: m.time,
+                                  var quote: QuoteUi?
+                                  if let r = m.replyTo {
+                                      if let o = c.findMsgId(r) { quote = QuoteUi(id: o.id, nick: o.nick, text: o.text) }
+                                      else { quote = QuoteUi(id: 0, nick: "", text: t("mensaje anterior")) }
+                                  }
+                                  return MsgUi(id: m.id, type: m.type, nick: m.nick, text: m.text, spans: m.spans, selfMsg: m.selfMsg, time: m.time,
                                         ts: m.ts, highlight: m.highlight, pending: m.pending, trans: m.trans, transState: m.transState,
                                         reacts: (m.reacts ?? []).map { ReactUi(emoji: $0.emoji, count: $0.count, mine: $0.mine) },
-                                        canReact: Irc.canReact(s, m))
+                                        canReact: Irc.canReact(s, m), msgid: m.msgid, reply: quote)
                               },
                               draft: c.draft, serverName: Config.servers.indices.contains(s.idx) ? Config.servers[s.idx].name : s.cfg.name,
                               host: s.cfg.host, nick: s.nick.ifEmpty(s.cfg.nick), state: s.state, away: s.away,
-                              myPrefix: Irc.myPrefix(s, c), canHistory: s.capHistory, listMask: s.listMask)
+                              myPrefix: Irc.myPrefix(s, c), canHistory: s.capHistory, listMask: s.listMask, capTags: s.capTags)
             } else { chan = nil }
             // requests from the network side
             if let (si, u) = Irc.focusReq { Irc.focusReq = nil; DispatchQueue.main.async { self.select(si, u) } }
@@ -185,16 +206,20 @@ final class UiState: ObservableObject {
     @Published var invite: (Int, String)?
     @Published var updateAsked = ""
     @Published var choose: ChooseAsk?
+    @Published var userCard: UserCardTarget?
+    @Published var miniVideo: VideoTarget?           // floating player over the chat
     @Published var msgSheet: MsgUi?
     @Published var chanListQuery = ""
 
     enum Sheet: Identifiable, Equatable {
-        case servers, settings, chanList, booru, help, users, quick, uploads, links, editServer(Int)
+        case servers, settings, chanList, booru, help, users, quick, uploads, links, editServer(Int), myProfile
         var id: String { "\(self)" }
     }
 
-    func closeAll() { sheet = nil; image = nil; video = nil }
+    func closeAll() { sheet = nil; image = nil; video = nil; userCard = nil }
 }
+
+struct UserCardTarget: Identifiable, Equatable { let id = UUID(); let sidx: Int; let nick: String }
 
 struct ImageTarget: Identifiable, Equatable { let id = UUID(); let url: String; let page: String; let post: BPost? }
 struct VideoTarget: Identifiable, Equatable { let id = UUID(); let url: String; let page: String }
@@ -211,7 +236,7 @@ enum Actions {
         case .image: UiState.shared.image = ImageTarget(url: p?.media.nonEmptyOrNil ?? Previews.imageUrl(url) ?? url, page: url, post: nil)
         case .video where ["webm", "mkv"].contains(url.substringBefore("?").substringAfterLast(".").lowercased()):
             browser(url)        // iOS plays MP4/MOV, not WebM
-        case .video: UiState.shared.video = VideoTarget(url: p?.media.nonEmptyOrNil ?? Previews.videoUrl(url), page: url)
+        case .video: UiState.shared.miniVideo = VideoTarget(url: p?.media.nonEmptyOrNil ?? Previews.videoUrl(url), page: url)
         case .page: browser(url)
         }
     }

@@ -13,11 +13,19 @@ func prefixOf(_ m: MsgUi) -> String {
     }
 }
 
-/// Message text with mIRC colours/bold/underline and tappable links.
-func formatText(_ m: MsgUi, _ base: Color) -> AttributedString {
-    var a = AttributedString(m.text)
+/// "<image url> 🎨 <artist>": the author goes under the image instead of in the line.
+func splitCaption(_ m: MsgUi) -> (length: Int?, caption: String) {
+    guard Config.linkPreviews, let r = m.text.range(of: " 🎨 "), let u = IrcText.urls(m.text, max: 1).first,
+          Previews.kindOf(u) == .image || (Previews.cached(u)?.kind == .image) else { return (nil, "") }
+    return (m.text.distance(from: m.text.startIndex, to: r.lowerBound), "🎨 " + String(m.text[r.upperBound...]))
+}
+
+/// Message text with mIRC colours/bold/underline and tappable links (cut at `upTo` characters).
+func formatText(_ m: MsgUi, _ base: Color, upTo: Int? = nil) -> AttributedString {
+    let shown = upTo.map { String(m.text.prefix($0)) } ?? m.text
+    var a = AttributedString(shown)
     a.foregroundColor = base
-    let n = m.text.count
+    let n = shown.count
     func range(_ from: Int, _ to: Int) -> Range<AttributedString.Index>? {
         guard from < to, to <= n else { return nil }
         let s = a.characters.index(a.startIndex, offsetBy: from)
@@ -40,10 +48,10 @@ func formatText(_ m: MsgUi, _ base: Color) -> AttributedString {
             if sp.underline { a[r].underlineStyle = .single }
         }
     }
-    var from = m.text.startIndex
-    for u in IrcText.urls(m.text) {
-        guard let r = m.text.range(of: u, range: from..<m.text.endIndex) else { continue }
-        let s = m.text.distance(from: m.text.startIndex, to: r.lowerBound)
+    var from = shown.startIndex
+    for u in IrcText.urls(shown) {
+        guard let r = shown.range(of: u, range: from..<shown.endIndex) else { continue }
+        let s = shown.distance(from: shown.startIndex, to: r.lowerBound)
         if let ar = range(s, s + u.count), let url = URL(string: u) {
             a[ar].link = url
             a[ar].foregroundColor = C.chan
@@ -82,6 +90,9 @@ struct MessageRow: View {
     let flash: Bool
     let onTap: () -> Void
     let onReact: (String) -> Void
+    var onReply: (() -> Void)? = nil
+    var onQuote: ((Int64) -> Void)? = nil
+    @State private var drag: CGFloat = 0
 
     var body: some View {
         if m.type == .date { DateSeparator(ts: m.ts) } else { row }
@@ -93,11 +104,13 @@ struct MessageRow: View {
 
     private var row: some View {
         let timeW = 44 * CGFloat(Config.fontPct) / 100
+        let cap = splitCaption(m)
         var line = AttributedString(prefixOf(m))
         line.foregroundColor = nickColor
         if chatty { line.inlinePresentationIntent = .stronglyEmphasized }
-        line += formatText(m, textColor)
+        line += formatText(m, textColor, upTo: cap.length)
         return VStack(alignment: .leading, spacing: 3) {
+            if let q = m.reply { QuoteView(q: q).padding(.leading, timeW).onTapGesture { if q.id != 0 { onQuote?(q.id) } } }
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text(m.pending ? "···" : m.time).font(.system(size: fs(12))).foregroundColor(C.faint).frame(width: timeW, alignment: .leading)
                 Text(line).font(.system(size: fs())).frame(maxWidth: .infinity, alignment: .leading)
@@ -109,7 +122,7 @@ struct MessageRow: View {
                     Text("» " + tr).font(.system(size: fs(14))).foregroundColor(C.trans)
                 }
                 if Config.linkPreviews && !m.pending && m.chatty, let u = IrcText.urls(m.text, max: 1).first {
-                    LinkPreviewView(url: u).padding(.top, 2)
+                    LinkPreviewView(url: u, caption: cap.caption).padding(.top, 2)
                 }
                 if !m.reacts.isEmpty {
                     HStack(spacing: 6) {
@@ -128,13 +141,48 @@ struct MessageRow: View {
         .padding(.horizontal, 10).padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(flash ? Color(hex: 0x2A3A5A) : m.highlight ? C.hlBg : .clear)
+        .offset(x: drag)
+        .background(alignment: .leading) {
+            // swipe right to reply
+            Image(systemName: "arrowshape.turn.up.left.fill").foregroundColor(C.accent)
+                .opacity(Double(min(drag / 60, 1))).padding(.leading, 12)
+        }
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .simultaneousGesture(DragGesture(minimumDistance: 24)
+            .onChanged { v in
+                guard onReply != nil, m.chatty, !m.pending, v.translation.width > 0, abs(v.translation.width) > abs(v.translation.height) * 2 else { return }
+                drag = min(v.translation.width * 0.6, 70)
+            }
+            .onEnded { _ in
+                if drag >= 55 { UIImpactFeedbackGenerator(style: .light).impactOccurred(); onReply?() }
+                withAnimation(.spring(response: 0.3)) { drag = 0 }
+            })
+    }
+}
+
+/// The message a reply answers, above it
+struct QuoteView: View {
+    let q: QuoteUi
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5).fill(q.nick.isEmpty ? C.faint : C.nick(q.nick)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                if !q.nick.isEmpty { Text(q.nick).font(.system(size: fs(12), weight: .semibold)).foregroundColor(C.nick(q.nick)) }
+                Text(q.text).font(.system(size: fs(13))).foregroundColor(C.dim).lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 5).padding(.horizontal, 8)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(C.sel.opacity(0.7)))
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 struct LinkPreviewView: View {
     let url: String
+    var caption = ""
     @State private var p: LinkPreview?
     @State private var broken = false
 
@@ -142,10 +190,18 @@ struct LinkPreviewView: View {
         Group {
             if let pv = p, !pv.ok { EmptyView() }
             else if let pv = p, pv.kind == .image, !broken {
-                RemoteImage(url: pv.media, maxPixel: 700, onFail: { broken = true })
-                    .frame(maxWidth: 320, maxHeight: 220, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    RemoteImage(url: pv.media, maxPixel: 700, onFail: { broken = true })
+                        .frame(maxWidth: 320, maxHeight: 220, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(C.line))
+                        .onTapGesture { Actions.openLink(url) }
+                    if !caption.isEmpty { Text(caption).font(.system(size: fs(13))).foregroundColor(C.dim).lineLimit(2) }
+                }
+            } else if let pv = p, pv.kind == .video, Previews.isLoop(url) {
+                // Imgur's GIFs are MP4s: they play in the chat, muted and looping
+                LoopingVideo(url: pv.media).frame(maxWidth: 320, maxHeight: 220).aspectRatio(16 / 9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(C.line))
                     .onTapGesture { Actions.openLink(url) }
             } else { card }
         }

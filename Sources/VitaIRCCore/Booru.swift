@@ -12,6 +12,7 @@ public struct BPost: Equatable, Identifiable {
     public var viewUrl: String          // sample shown in the viewer
     public var fileUrl: String          // original
     public var tags: String
+    public var artist = ""              // "" when the service doesn't say
     public var key: String { "\(engine)/\(id)" }
 }
 
@@ -87,6 +88,15 @@ public enum Booru {
         }
     }
 
+    /// "artist_name" tags -> "artist name, other" ("" when none or only placeholders)
+    static func artistName(_ tags: [String]) -> String {
+        let skip: Set<String> = ["banned_artist", "unknown_artist", "anonymous_artist", "artist_request", "third-party_edit"]
+        return tags.filter { !$0.isEmpty && !skip.contains($0) }.prefix(3).map { $0.replacingOccurrences(of: "_", with: " ") }.joined(separator: ", ")
+    }
+
+    /// The message for the chat: link and, when known, the author ("<url> 🎨 <artist>").
+    public static func chatText(_ link: String, _ p: BPost) -> String { p.artist.isEmpty ? link : "\(link) 🎨 \(p.artist)" }
+
     private static func badExt(_ e: String) -> Bool { e.isEmpty || ["mp4", "webm", "zip", "swf", "avif"].contains(e) }
 
     static func urlExt(_ url: String) -> String {
@@ -150,6 +160,24 @@ public enum Booru {
         return np
     }
 
+    /// One post by its number (a public favorite of someone else's profile).
+    public static func lookup(_ engine: Int, _ id: String) throws -> BPost {
+        let safeId = id.filter { $0.isLetter || $0.isNumber }
+        let r: HttpResult
+        switch engine {
+        case safebooru: r = try Http.call("https://safebooru.org/index.php?page=dapi&s=post&q=index&json=1&id=\(safeId)")
+        case danbooru: r = try Http.call("https://danbooru.donmai.us/posts/\(safeId).json")
+        default:
+            skLogin()
+            r = try Http.call("https://sankakuapi.com/v2/posts/keyset?lang=en&limit=1&tags=" + Http.urlEncode("id:\(safeId)"), headers: skHeaders(), ua: "Mozilla/5.0")
+        }
+        if !r.ok { throw HttpError("HTTP \(r.code)") }
+        // Danbooru answers one object; the parser reads lists
+        let body = engine == danbooru ? Data("[".utf8) + r.body + Data("]".utf8) : r.body
+        guard let p = parse(engine, body, Config.searchAdult).posts.first else { throw HttpError(t("Sin resultados.")) }
+        return p
+    }
+
     public static func fresh(_ p: BPost) throws -> BPost { expired(p) ? try refresh(p) : p }
 
     // MARK: - search
@@ -184,6 +212,7 @@ public enum Booru {
                 p = BPost(engine: engine, id: jstr(it["id"]), rating: ratingCode(jstr(it["rating"])), w: jint(it["image_width"]), h: jint(it["image_height"]),
                           ext: jstr(it["file_ext"]).lowercased(), fileSize: Int64(jint(it["file_size"])), thumbUrl: jstr(it["preview_file_url"]),
                           viewUrl: jstr(it["large_file_url"]), fileUrl: jstr(it["file_url"]), tags: tags)
+                p.artist = artistName(jstr(it["tag_string_artist"]).split(separator: " ").map(String.init))
             default:
                 if jstr(it["is_premium"]) == "true" || jstr(it["redirect_to_signup"]) == "true" { continue }
                 let ta = (it["tags"] as? [[String: Any]]) ?? []
@@ -191,11 +220,15 @@ public enum Booru {
                     let n = jstr(o["tagName"]).ifEmpty(jstr(o["name_en"]).ifEmpty(jstr(o["name"])))
                     return n.isEmpty ? nil : n.replacingOccurrences(of: " ", with: "_")
                 }.joined(separator: " ")
+                let artists = ta.compactMap { o -> String? in
+                    jint(o["type"]) == 1 ? jstr(o["tagName"]).ifEmpty(jstr(o["name_en"]).ifEmpty(jstr(o["name"]))) : nil
+                }
                 let sample = jstr(it["sample_url"])
                 let r = jstr(it["rating"])
                 p = BPost(engine: engine, id: jstr(it["id"]), rating: r == "s" ? "g" : ratingCode(r), w: jint(it["width"]), h: jint(it["height"]),
                           ext: jstr(it["file_ext"]).lowercased(), fileSize: Int64(jint(it["file_size"])), thumbUrl: sample, viewUrl: sample,
                           fileUrl: jstr(it["file_url"]), tags: tags)
+                p.artist = artistName(artists)
             }
             if p.viewUrl.isEmpty { p.viewUrl = p.fileUrl }
             if !p.id.isEmpty && !p.fileUrl.isEmpty && !p.thumbUrl.isEmpty && !badExt(p.ext) && allowed(p.rating, tags, adult) {
@@ -314,7 +347,7 @@ public enum Booru {
         let f = favorites
         if f.isEmpty { try? FileManager.default.removeItem(at: favFile); return }
         let text = f.map { p in
-            "\(p.engine)\t\(p.id)\t\(p.rating)\t\(p.w)\t\(p.h)\t\(p.ext)\t\(p.fileSize)\t\(p.thumbUrl)\t\(p.viewUrl)\t\(p.fileUrl)\t\(p.tags.replacingOccurrences(of: "\t", with: " "))\n"
+            "\(p.engine)\t\(p.id)\t\(p.rating)\t\(p.w)\t\(p.h)\t\(p.ext)\t\(p.fileSize)\t\(p.thumbUrl)\t\(p.viewUrl)\t\(p.fileUrl)\t\(p.tags.replacingOccurrences(of: "\t", with: " "))\t\(p.artist.replacingOccurrences(of: "\t", with: " "))\n"
         }.joined()
         try? text.write(to: favFile, atomically: true, encoding: .utf8)
     }
@@ -325,8 +358,10 @@ public enum Booru {
             for l in text.split(separator: "\n") {
                 let f = l.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
                 guard f.count >= 10, let e = Int(f[0]), (0...2).contains(e) else { continue }
-                list.append(BPost(engine: e, id: f[1], rating: f[2].first ?? "g", w: Int(f[3]) ?? 0, h: Int(f[4]) ?? 0, ext: f[5],
-                                  fileSize: Int64(f[6]) ?? 0, thumbUrl: f[7], viewUrl: f[8], fileUrl: f[9], tags: f.count > 10 ? f[10] : ""))
+                var p = BPost(engine: e, id: f[1], rating: f[2].first ?? "g", w: Int(f[3]) ?? 0, h: Int(f[4]) ?? 0, ext: f[5],
+                              fileSize: Int64(f[6]) ?? 0, thumbUrl: f[7], viewUrl: f[8], fileUrl: f[9], tags: f.count > 10 ? f[10] : "")
+                p.artist = f.count > 11 ? f[11] : ""
+                list.append(p)
             }
         }
         lock.lock()
@@ -357,7 +392,7 @@ public enum Booru {
         appQueue.async {
             let res: UploadResult
             do {
-                if p0.engine != sankaku { res = UploadResult(sidx: sidx, uid: uid, ok: true, text: p0.fileUrl) } else {
+                if p0.engine != sankaku { res = UploadResult(sidx: sidx, uid: uid, ok: true, text: chatText(p0.fileUrl, p0)) } else {
                     let p = try fresh(p0)
                     let original = (1...8 * 1024 * 1024).contains(p.fileSize)
                     let url = original ? p.fileUrl : p.viewUrl
@@ -365,7 +400,8 @@ public enum Booru {
                     let data = try download(p, url).body
                     let ext = urlExt(url).ifEmpty("jpg")
                     let mime = ext == "png" ? "image/png" : ext == "webp" ? "image/webp" : ext == "gif" ? "image/gif" : "image/jpeg"
-                    res = UploadResult(sidx: sidx, uid: uid, ok: true, text: try Uploader.uploadNow(sidx, UploadSource(name: "sankaku_\(p.id).\(ext)", mime: mime, data: data)))
+                    let link = try Uploader.uploadNow(sidx, UploadSource(name: "sankaku_\(p.id).\(ext)", mime: mime, data: data))
+                    res = UploadResult(sidx: sidx, uid: uid, ok: true, text: chatText(link, p))
                 }
             } catch {
                 res = UploadResult(sidx: sidx, uid: uid, ok: false, text: (error as? HttpError)?.message ?? error.localizedDescription)
