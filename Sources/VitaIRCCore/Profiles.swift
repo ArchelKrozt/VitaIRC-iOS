@@ -8,6 +8,7 @@ public struct Profile: Equatable {
     public var avatar = Data()           // JPEG
     public var favs: [ProfileFav] = []
     public var none = false              // the owner doesn't share a profile
+    public init(nick: String) { self.nick = nick }
 }
 
 public struct ProfileFav: Equatable, Identifiable, Hashable {
@@ -15,6 +16,7 @@ public struct ProfileFav: Equatable, Identifiable, Hashable {
     public let id: String
     public let thumb: String             // "" when not sent (Sankaku)
     public var key: String { "\(engine)/\(id)" }
+    public init(engine: Int, id: String, thumb: String) { self.engine = engine; self.id = id; self.thumb = thumb }
 }
 
 /// WHOIS answer gathered into one card.
@@ -28,6 +30,7 @@ public struct WhoisInfo: Equatable {
     public var oper = false
     public var actualHost = ""
     public var found = true
+    public init(nick: String, found: Bool = true) { self.nick = nick; self.found = found }
 }
 
 /// My own profile: name, bio, avatar and which favorites are public. Stored on the device only.
