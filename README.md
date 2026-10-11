@@ -36,6 +36,11 @@ Get `VitaIRC.ipa` from the [latest release](../../releases/latest). iOS 16 or ne
 - IRCv3 `server-time`, `batch` and `chathistory`: what you missed arrives with its real time, private
   conversations included; older messages load when you scroll to the top.
 - Reactions (`+draft/react`) and soju's `FILEHOST` uploads.
+- **Quoted replies** (`+draft/reply`): swipe a message to reply; the quote shows above the answer.
+- **User cards**: tap a user for a floating card with their WHOIS and **VitaIRC profile** (name, bio,
+  picture, public favorites). Your profile stays on your device and is sent over IRC to whoever asks,
+  with no server in between ([protocol](docs/PROFILE-PROTOCOL.md)); works with the PS Vita and Android.
+- Images sent from the image search carry the **artist's name**; videos play in a **floating window**.
 
 **Translation**: Google (free, no account) or ChatGPT with your OpenAI API key; incoming messages,
 your own before sending, or one message; a language per channel.

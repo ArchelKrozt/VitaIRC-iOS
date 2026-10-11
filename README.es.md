@@ -34,6 +34,12 @@ Baja `VitaIRC.ipa` de la [última versión](../../releases/latest). iOS 16 o sup
 su hora real, también los privados; los mensajes anteriores se cargan al subir), reacciones y subidas
 con `FILEHOST` de soju.
 
+**Social**: respuestas citadas (`+draft/reply`, desliza un mensaje para responder), tarjeta de
+usuario con su WHOIS y su **perfil VitaIRC** (nombre, bio, foto y favoritos públicos, guardados en tu
+dispositivo y enviados por IRC a quien los pida, sin servidores de por medio:
+[protocolo](docs/PROFILE-PROTOCOL.md)), nombre del artista bajo las imágenes del buscador y video en
+ventana flotante. Funciona con la PS Vita y Android.
+
 **Traducción**: Google (gratis, sin cuenta) o ChatGPT con tu API key de OpenAI; mensajes recibidos,
 los tuyos antes de enviarlos o uno solo; un idioma por canal.
 
