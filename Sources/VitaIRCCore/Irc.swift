@@ -1389,7 +1389,9 @@ public enum Irc {
         case 317: w.idleSecs = Int(l.p[2]) ?? -1; w.signon = l.p.count > 4 ? (Int64(l.p[3]) ?? 0) * 1000 : 0
         case 319: w.channels += l.last.split(separator: " ").map(String.init)
         case 330: w.account = l.p[2]
-        case 338, 378: w.actualHost = l.last.replacingOccurrences(of: "is connecting from ", with: "")
+        // 338 <me> <nick> <ip/host> :actually using host   ·   378 <me> <nick> :is connecting from *@host ip
+        case 338: w.actualHost = l.p.count >= 4 ? l.p[2] : l.last
+        case 378: w.actualHost = l.last.replacingOccurrences(of: "is connecting from ", with: "")
         case 671: w.secure = true
         case 301: w.away = l.last
         default: break

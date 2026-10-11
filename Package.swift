@@ -11,5 +11,7 @@ let package = Package(
         .target(name: "VitaIRCCore"),
         // checks: `swift run CoreChecks` (a program, so it needs no XCTest)
         .executableTarget(name: "CoreChecks", dependencies: ["VitaIRCCore"]),
+        // a VitaIRC user without screen, to test profiles between apps
+        .executableTarget(name: "VitaPeer", dependencies: ["VitaIRCCore"]),
     ]
 )
